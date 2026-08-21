@@ -1,5 +1,6 @@
 import readline from 'readline';
 import { MongoClient } from 'mongodb';
+import { dbSchemas } from './dbSchemas.js';
 
 const rl = readline.createInterface({
     input: process.stdin,
@@ -41,10 +42,39 @@ class Database {
             await this.cliente.connect();
             this.db = this.cliente.db(this.nombreBD);
             console.log(' Conexión establecida exitosamente con MongoDB');
+
+            // Aplicar esquemas e índices únicos de forma automatizada (SOLID: OCP/SRP)
+            await this.inicializarEsquemas();
+
             return this.db;
         } catch (error) {
             console.log(' Error al conectar con MongoDB:', error.message);
             throw error;
+        }
+    }
+
+    async inicializarEsquemas() {
+        try {
+            const coleccionesExistentes = (await this.db.listCollections().toArray()).map(c => c.name);
+
+            for (const [nombreColeccion, esquema] of Object.entries(dbSchemas)) {
+                if (!coleccionesExistentes.includes(nombreColeccion)) {
+                    await this.db.createCollection(nombreColeccion, { validator: esquema });
+                } else {
+                    await this.db.command({
+                        collMod: nombreColeccion,
+                        validator: esquema
+                    });
+                }
+            }
+
+            // Creación de índices para garantizar unicidad en la base de datos
+            await this.db.collection('CrearCuenta').createIndex({ numeroCuenta: 1 }, { unique: true });
+            await this.db.collection('Deposit').createIndex({ id: 1 }, { unique: true });
+            await this.db.collection('Withdraw').createIndex({ id: 1 }, { unique: true });
+
+        } catch (error) {
+            console.log(' Error al aplicar esquemas e índices:', error.message);
         }
     }
 
@@ -435,7 +465,6 @@ async function menuPrincipal() {
                     }
                 }
 
-                // Generación de ID propio de la colección Deposit (D-001, D-002...)
                 const idTx = await depositRepo.obtenerSiguienteId();
                 const tx = cuentaObj.depositar(monto, idTx);
 
@@ -464,7 +493,6 @@ async function menuPrincipal() {
                     }
                 }
 
-                // Generación de ID propio de la colección Withdraw (W-001, W-002...)
                 const idTx = await withdrawRepo.obtenerSiguienteId();
                 const tx = cuentaObj.retirar(monto, idTx);
 
@@ -520,7 +548,6 @@ async function menuPrincipal() {
                     }
                 }
 
-                // Utiliza la referencia ingresada por el usuario como ID de la transacción
                 const idTx = referencia;
                 const tx = cuentaObj.pagarServicio(monto, servicio, referencia, idTx);
 
